@@ -53,22 +53,74 @@ if uploaded_file is not None:
   # Preprocessing Tanggal & Koordinat untuk Manual & Engpar
   today = pd.to_datetime(datetime.today().date())
 
+  # --- AMBIL TANGGAL CREATED DARI SHEET CLAIM & MERGE KE MANUAL ---
+  if not df_claim.empty and not df_manual.empty:
+    claim_date_col = None
+    for col in df_claim.columns:
+      col_lower = col.lower()
+      if "date" in col_lower or "tanggal" in col_lower or "created" in col_lower:
+        claim_date_col = col
+        break
+
+    if not claim_date_col and len(df_claim.columns) > 0:
+      claim_date_col = df_claim.columns[0]
+
+    join_key = None
+    for key in ["Pre Approval Cert#", "Site Id", "Cert#"]:
+      if key in df_claim.columns and key in df_manual.columns:
+        join_key = key
+        break
+
+    if claim_date_col and join_key:
+      df_claim_temp = df_claim[[join_key, claim_date_col]].drop_duplicates(
+          subset=[join_key]
+      )
+      df_claim_temp["Date_Created_dt"] = pd.to_datetime(
+          df_claim_temp[claim_date_col], format="%d/%m/%Y", errors="coerce"
+      )
+
+      if df_claim_temp["Date_Created_dt"].isnull().all():
+        df_claim_temp["Date_Created_dt"] = pd.to_datetime(
+            df_claim_temp[claim_date_col], errors="coerce"
+        )
+
+      df_manual = df_manual.merge(
+          df_claim_temp[[join_key, "Date_Created_dt"]],
+          on=join_key,
+          how="left",
+      )
+
   if not df_manual.empty:
+    if "Date_Created_dt" not in df_manual.columns:
+      df_manual["Date_Created_dt"] = pd.to_datetime(today)
+
+    df_manual["Aging_Created_Days"] = (
+        today - df_manual["Date_Created_dt"]
+    ).dt.days
+
     if "Date Pengiriman MSS" in df_manual.columns:
       df_manual["Date_MSS_dt"] = pd.to_datetime(
           df_manual["Date Pengiriman MSS"], format="%d/%m/%Y", errors="coerce"
       )
-      df_manual["Aging MSS (Hari)"] = (today - df_manual["Date_MSS_dt"]).dt.days
+      if df_manual["Date_MSS_dt"].isnull().all():
+        df_manual["Date_MSS_dt"] = pd.to_datetime(
+            df_manual["Date Pengiriman MSS"], errors="coerce"
+        )
+      df_manual["Aging_MSS_Days"] = (today - df_manual["Date_MSS_dt"]).dt.days
     else:
-      df_manual["Aging MSS (Hari)"] = np.nan
+      df_manual["Aging_MSS_Days"] = np.nan
 
     if "Date Pengiriman KSO" in df_manual.columns:
       df_manual["Date_KSO_dt"] = pd.to_datetime(
           df_manual["Date Pengiriman KSO"], format="%d/%m/%Y", errors="coerce"
       )
-      df_manual["Aging KSO (Hari)"] = (today - df_manual["Date_KSO_dt"]).dt.days
+      if df_manual["Date_KSO_dt"].isnull().all():
+        df_manual["Date_KSO_dt"] = pd.to_datetime(
+            df_manual["Date Pengiriman KSO"], errors="coerce"
+        )
+      df_manual["Aging_KSO_Days"] = (today - df_manual["Date_KSO_dt"]).dt.days
     else:
-      df_manual["Aging KSO (Hari)"] = np.nan
+      df_manual["Aging_KSO_Days"] = np.nan
 
     # Merge Koordinat jika ada di Sheet Engpar
     if not df_engpar.empty and "Site Id" in df_manual.columns:
@@ -177,7 +229,6 @@ if uploaded_file is not None:
               color="Jumlah",
               color_continuous_scale="Blues",
           )
-          # MENAMBAHKAN ANGKA PERSIS DI UJUNG BAR CHART
           fig_bar_claim.update_traces(
               texttemplate="%{x}", textposition="outside"
           )
@@ -461,86 +512,72 @@ if uploaded_file is not None:
     if not df_manual.empty:
       df_manual_calc = df_manual.copy()
 
-      # Preprocessing Tanggal & Aging
-      df_manual_calc["Date_MSS_dt"] = pd.to_datetime(
-          df_manual_calc["Date Pengiriman MSS"], format="%d/%m/%Y", errors="coerce"
-      )
-      df_manual_calc["Date_KSO_dt"] = pd.to_datetime(
-          df_manual_calc["Date Pengiriman KSO"], format="%d/%m/%Y", errors="coerce"
-      )
-
-      df_manual_calc["Aging_MSS_Days"] = (
-          today - df_manual_calc["Date_MSS_dt"]
-      ).dt.days
-      df_manual_calc["Aging_KSO_Days"] = (
-          today - df_manual_calc["Date_KSO_dt"]
-      ).dt.days
-
-      # Metrik Atas
-      mss_need_send_cnt = (
+      # --- METRIK REVISI SCOREBOARD ---
+      # 1. MSS Need Send
+      df_mss_need = df_manual_calc[
           df_manual_calc["Status Pengiriman MSS"]
           .astype(str)
           .str.strip()
           .eq("MSS Need Send")
-          .sum()
+      ].copy()
+      mss_need_send_cnt = len(df_mss_need)
+      max_aging_mss_need = (
+          df_mss_need["Aging_Created_Days"].max()
+          if not df_mss_need.empty
+          else 0
       )
-      mss_done_send_cnt = (
-          df_manual_calc["Status Pengiriman MSS"]
-          .astype(str)
-          .str.strip()
-          .eq("MSS Done Send")
-          .sum()
-      )
+      if pd.isna(max_aging_mss_need):
+        max_aging_mss_need = 0
 
+      # 2. MSS Done Send
       df_mss_done = df_manual_calc[
           df_manual_calc["Status Pengiriman MSS"]
           .astype(str)
           .str.strip()
           .eq("MSS Done Send")
       ].copy()
-      avg_aging_mss = (
-          df_mss_done["Aging_MSS_Days"].mean()
-          if not df_mss_done.empty
-          else 0
+      mss_done_send_cnt = len(df_mss_done)
+      max_aging_mss_done = (
+          df_mss_done["Aging_MSS_Days"].max() if not df_mss_done.empty else 0
       )
+      if pd.isna(max_aging_mss_done):
+        max_aging_mss_done = 0
 
+      # 3. KSO Done Send
       df_kso_done = df_manual_calc[
           df_manual_calc["Date_KSO_dt"].notnull()
       ].copy()
       total_kso_done = len(df_kso_done)
-      avg_aging_kso = (
-          df_kso_done["Aging_KSO_Days"].mean() if not df_kso_done.empty else 0
-      )
 
       mc1, mc2, mc3 = st.columns(3)
       with mc1:
         st.metric(
             label="🚨 MSS Need Send",
             value=int(mss_need_send_cnt),
-            help="Total material yang berstatus MSS Need Send (butuh dikirim)",
+            delta=(
+                f"Max Aging: {int(max_aging_mss_need)} Hari"
+                if max_aging_mss_need > 0
+                else "0 Hari"
+            ),
+            delta_color="inverse",
+            help="Total material berstatus MSS Need Send beserta Max Aging dari tanggal Created (Sheet Claim)",
         )
       with mc2:
         st.metric(
             label="✅ MSS Done Send",
             value=int(mss_done_send_cnt),
             delta=(
-                f"Avg Aging: {avg_aging_mss:.0f} Hari"
-                if avg_aging_mss > 0
+                f"Max Aging: {int(max_aging_mss_done)} Hari"
+                if max_aging_mss_done > 0
                 else "0 Hari"
             ),
             delta_color="inverse",
-            help="Total material yang berstatus MSS Done Send (sudah dikirim)",
+            help="Total material berstatus MSS Done Send beserta Max Aging dari tanggal MSS Done Send",
         )
       with mc3:
         st.metric(
             label="🏢 KSO Done Send",
             value=int(total_kso_done),
-            delta=(
-                f"Avg Aging: {avg_aging_kso:.0f} Hari"
-                if avg_aging_kso > 0
-                else "0 Hari"
-            ),
-            delta_color="normal",
             help="Total barang pengganti yang sudah dikirim oleh KSO",
         )
 
@@ -591,7 +628,7 @@ if uploaded_file is not None:
           )
           st.divider()
 
-      # --- DAFTAR 17 KOLOM UTAMA + AGING DAYS (DIJAMIN TANPA DUPLIKAT) ---
+      # --- DAFTAR KOLOM UTAMA + RESI PENGIRIMAN + AGING DAYS ---
       exact_columns = [
           "Pre Approval Cert#",
           "Site Id",
@@ -608,6 +645,7 @@ if uploaded_file is not None:
           "KSO Need Send?",
           "Date Pengiriman MSS",
           "Status Pengiriman MSS",
+          "Resi Pengiriman",  # Kolom Resi Pengiriman yang baru ditambahkan
           "Date Pengiriman KSO",
           "Status Pengiriman KSO / On hand MSS",
       ]
@@ -620,6 +658,7 @@ if uploaded_file is not None:
 
       # --- 1. DETAIL TABEL PENGIRIMAN MSS & STATUS APPROVAL ---
       st.markdown("### 📦 Detail Tabel Pengiriman MSS & Status Approval")
+
       df_mss_summary = df_manual_calc[
           df_manual_calc["Status Pengiriman MSS"]
           .astype(str)
@@ -628,12 +667,40 @@ if uploaded_file is not None:
       ].copy()
 
       if not df_mss_summary.empty:
-        df_mss_summary_sorted = df_mss_summary.sort_values(
-            by=["Status Pengiriman MSS", "Aging_MSS_Days"],
-            ascending=[False, False],
+        # Menyesuaikan kolom aging berdasarkan status masing-masing baris di tabel detail
+        df_mss_summary["Aging Days"] = np.where(
+            df_mss_summary["Status Pengiriman MSS"].str.strip()
+            == "MSS Need Send",
+            df_mss_summary["Aging_Created_Days"],
+            df_mss_summary["Aging_MSS_Days"],
         )
-        df_mss_summary_sorted = df_mss_summary_sorted.rename(
-            columns={"Aging_MSS_Days": "Aging Days"}
+
+        # --- FITUR FILTER STATUS PENGIRIMAN MSS ---
+        available_mss_statuses = (
+            df_mss_summary["Status Pengiriman MSS"]
+            .astype(str)
+            .str.strip()
+            .unique()
+            .tolist()
+        )
+        selected_mss_status = st.selectbox(
+            "🔍 Filter Status Pengiriman MSS:",
+            options=["Semua Status"] + available_mss_statuses,
+            index=0,
+            help="Filter data tabel pengiriman MSS berdasarkan statusnya",
+        )
+
+        # Apply Filter
+        if selected_mss_status != "Semua Status":
+          df_mss_filtered = df_mss_summary[
+              df_mss_summary["Status Pengiriman MSS"].str.strip()
+              == selected_mss_status
+          ]
+        else:
+          df_mss_filtered = df_mss_summary.copy()
+
+        df_mss_summary_sorted = df_mss_filtered.sort_values(
+            by=["Status Pengiriman MSS", "Aging Days"], ascending=[False, False]
         )
 
         cols_mss = get_unique_valid_cols(
