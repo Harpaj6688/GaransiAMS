@@ -153,7 +153,7 @@ if uploaded_file is not None:
   ])
 
   # =========================================================================
-  # --- TAB 1: DASHBOARD APPROVAL (Bersumber dari Sheet Claim + Pie & Bar Chart) ---
+  # --- TAB 1: DASHBOARD APPROVAL (Bersumber dari Sheet Claim + Manual Ref) ---
   # =========================================================================
   with tab1:
     st.subheader(
@@ -195,24 +195,151 @@ if uploaded_file is not None:
 
       st.divider()
 
-      # --- VISUALISASI PIE CHART & BAR CHART DENGAN LABELS ANGKAT ---
-      st.markdown("### 📈 Grafik Analisis Approval & Claim")
+      # --- VISUALISASI TREEMAP PROVINSI & TOP MATERIAL ---
+      st.markdown(
+          "### 📈 Grafik Analisis Berdasarkan Provinsi (Treemap) & Top Material"
+      )
       col_c1, col_c2 = st.columns(2)
 
       with col_c1:
-        if "Current Phase" in df_claim.columns:
-          phase_counts = df_claim["Current Phase"].value_counts().reset_index()
-          phase_counts.columns = ["Phase", "Jumlah"]
-          fig_pie_claim = px.pie(
-              phase_counts,
-              values="Jumlah",
-              names="Phase",
-              hole=0.4,
-              title="<b>Distribusi Berdasarkan Current Phase</b>",
+        join_key_chart = None
+        for key in ["Pre Approval Cert#", "Site Id", "Cert#"]:
+          if (
+              not df_manual.empty
+              and key in df_claim.columns
+              and key in df_manual.columns
+          ):
+            join_key_chart = key
+            break
+
+        if not df_manual.empty and join_key_chart:
+          manual_ref_cols = [join_key_chart]
+          prov_col_found = next(
+              (c for c in ["Provinsi", "Province", "Prov"] if c in df_manual.columns),
+              None,
           )
-          fig_pie_claim.update_traces(textinfo="label+value")
-          fig_pie_claim.update_layout(margin=dict(t=40, b=20, l=20, r=20))
-          st.plotly_chart(fig_pie_claim, use_container_width=True)
+          scope_col_found = next(
+              (c for c in ["Scope", "Kategori Scope", "Scope Pekerjaan"] if c in df_manual.columns),
+              None,
+          )
+
+          if prov_col_found:
+            manual_ref_cols.append(prov_col_found)
+          if scope_col_found:
+            manual_ref_cols.append(scope_col_found)
+
+          if prov_col_found:
+            df_chart_merged = df_claim.merge(
+                df_manual[manual_ref_cols].drop_duplicates(subset=[join_key_chart]),
+                on=join_key_chart,
+                how="left",
+            )
+
+            if not scope_col_found:
+              scope_col_found = next(
+                  (c for c in ["Scope", "Kategori Scope", "Scope Pekerjaan"] if c in df_chart_merged.columns),
+                  None,
+              )
+              if not scope_col_found:
+                df_chart_merged["Scope_Default"] = "General Scope"
+                scope_col_found = "Scope_Default"
+
+            # Standarisasi status cancel / reject
+            if status_col in df_chart_merged.columns:
+              is_cancel_or_reject = df_chart_merged[status_col].astype(str).str.contains(
+                  "Cancel|Reject", case=False, na=False
+              )
+              df_chart_merged.loc[is_cancel_or_reject, scope_col_found] = "REJECTED / CANCELED"
+
+            # Hitung Jumlah Tiket & Total Material
+            qty_col = next((c for c in ["Quantity", "Qty", "Jumlah"] if c in df_chart_merged.columns), None)
+            
+            if qty_col:
+              df_chart_merged[qty_col] = pd.to_numeric(df_chart_merged[qty_col], errors="coerce").fillna(1)
+              df_grouped_prov = (
+                  df_chart_merged.groupby([prov_col_found, scope_col_found])
+                  .agg(Jumlah_Tiket=(join_key_chart, "count"), Total_Material=(qty_col, "sum"))
+                  .reset_index()
+              )
+            else:
+              df_grouped_prov = (
+                  df_chart_merged.groupby([prov_col_found, scope_col_found])
+                  .agg(Jumlah_Tiket=(join_key_chart, "count"))
+                  .reset_index()
+              )
+              df_grouped_prov["Total_Material"] = df_grouped_prov["Jumlah_Tiket"]
+
+            df_grouped_prov = df_grouped_prov.rename(columns={
+                prov_col_found: "Provinsi",
+                scope_col_found: "Scope"
+            })
+
+            # --- MEMBUAT LABEL PROVINSI DENGAN TOTAL TIKET & MATERIAL ---
+            prov_summary = (
+                df_grouped_prov.groupby("Provinsi")
+                .agg(Total_Tiket=("Jumlah_Tiket", "sum"), Total_Mat=("Total_Material", "sum"))
+                .reset_index()
+            )
+            
+            # Map nama provinsi baru dengan format: "NAMA PROVINSI | X Tiket, Y Material"
+            prov_name_mapping = {}
+            for _, row in prov_summary.iterrows():
+              p_raw = row["Provinsi"]
+              p_formatted = f"{str(p_raw).upper()} | {int(row['Total_Tiket'])} Tiket, {int(row['Total_Mat'])} Material"
+              prov_name_mapping[p_raw] = p_formatted
+
+            df_grouped_prov["Provinsi_Label"] = df_grouped_prov["Provinsi"].map(prov_name_mapping)
+
+            # Pembobotan visual agar kotak kecil (seperti Kaltara) tetap proporsional
+            df_grouped_prov["Visual_Size"] = df_grouped_prov["Jumlah_Tiket"].apply(
+                lambda x: max(x, 10)
+            )
+
+            color_map = {
+                "Power": "#59A14F",                # Hijau Soft
+                "BTS": "#4E79A7",                  # Biru Tua Soft
+                "Transmission": "#9CC2E5",         # Steel Blue Soft
+                "Transmisi": "#9CC2E5",            
+                "Tower": "#4B9CD3",                # Biru Sedang
+                "REJECTED / CANCELED": "#E15759",  # Merah Soft
+            }
+
+            fig_treemap = px.treemap(
+                df_grouped_prov,
+                path=["Provinsi_Label", "Scope"],
+                values="Visual_Size",
+                color="Scope",
+                color_discrete_map=color_map,
+                title="<b>Distribusi Tiket per Provinsi & Scope (Treemap)</b>",
+                custom_data=["Jumlah_Tiket", "Total_Material"]
+            )
+            
+            fig_treemap.update_traces(
+                textinfo="label+value",
+                texttemplate="<b>%{label}</b><br>%{customdata[0]} Tiket | %{customdata[1]} Mat",
+                hovertemplate=(
+                    "<b>Provinsi / Scope:</b> %{label}<br>"
+                    "<b>Jumlah Tiket:</b> %{customdata[0]} Tiket<br>"
+                    "<b>Total Material:</b> %{customdata[1]} Material"
+                ),
+                marker=dict(
+                    line=dict(width=1.5, color="white")
+                )
+            )
+            
+            fig_treemap.update_layout(
+                template="plotly_white",
+                paper_bgcolor="white",
+                plot_bgcolor="white",
+                margin=dict(t=40, b=20, l=10, r=10),
+                height=480
+            )
+
+            st.plotly_chart(fig_treemap, use_container_width=True)
+          else:
+            st.info("Kolom 'Provinsi' tidak ditemukan di dalam Sheet Manual.")
+        else:
+          st.info("Sheet Manual kosong atau tidak ada key yang cocok untuk merge data provinsi.")
 
       with col_c2:
         if "Material" in df_claim.columns:
@@ -512,8 +639,7 @@ if uploaded_file is not None:
     if not df_manual.empty:
       df_manual_calc = df_manual.copy()
 
-      # --- METRIK REVISI SCOREBOARD ---
-      # 1. MSS Need Send
+      # --- METRIK SCOREBOARD ---
       df_mss_need = df_manual_calc[
           df_manual_calc["Status Pengiriman MSS"]
           .astype(str)
@@ -529,7 +655,6 @@ if uploaded_file is not None:
       if pd.isna(max_aging_mss_need):
         max_aging_mss_need = 0
 
-      # 2. MSS Done Send
       df_mss_done = df_manual_calc[
           df_manual_calc["Status Pengiriman MSS"]
           .astype(str)
@@ -543,7 +668,6 @@ if uploaded_file is not None:
       if pd.isna(max_aging_mss_done):
         max_aging_mss_done = 0
 
-      # 3. KSO Done Send
       df_kso_done = df_manual_calc[
           df_manual_calc["Date_KSO_dt"].notnull()
       ].copy()
@@ -560,7 +684,7 @@ if uploaded_file is not None:
                 else "0 Hari"
             ),
             delta_color="inverse",
-            help="Total material berstatus MSS Need Send beserta Max Aging dari tanggal Created (Sheet Claim)",
+            help="Total material berstatus MSS Need Send beserta Max Aging",
         )
       with mc2:
         st.metric(
@@ -572,7 +696,7 @@ if uploaded_file is not None:
                 else "0 Hari"
             ),
             delta_color="inverse",
-            help="Total material berstatus MSS Done Send beserta Max Aging dari tanggal MSS Done Send",
+            help="Total material berstatus MSS Done Send beserta Max Aging",
         )
       with mc3:
         st.metric(
@@ -583,7 +707,7 @@ if uploaded_file is not None:
 
       st.divider()
 
-      # --- TAB 2: PETA SEBARAN LOKASI ---
+      # --- PETA SEBARAN LOKASI ---
       if (
           "latitude" in df_manual_calc.columns
           and "longitude" in df_manual_calc.columns
@@ -628,7 +752,6 @@ if uploaded_file is not None:
           )
           st.divider()
 
-      # --- DAFTAR KOLOM UTAMA + RESI PENGIRIMAN + AGING DAYS ---
       exact_columns = [
           "Pre Approval Cert#",
           "Site Id",
@@ -645,7 +768,7 @@ if uploaded_file is not None:
           "KSO Need Send?",
           "Date Pengiriman MSS",
           "Status Pengiriman MSS",
-          "Resi Pengiriman",  # Kolom Resi Pengiriman yang baru ditambahkan
+          "Resi Pengiriman",
           "Date Pengiriman KSO",
           "Status Pengiriman KSO / On hand MSS",
       ]
@@ -656,7 +779,6 @@ if uploaded_file is not None:
           available.append(aging_col_name)
         return list(dict.fromkeys(available))
 
-      # --- 1. DETAIL TABEL PENGIRIMAN MSS & STATUS APPROVAL ---
       st.markdown("### 📦 Detail Tabel Pengiriman MSS & Status Approval")
 
       df_mss_summary = df_manual_calc[
@@ -667,7 +789,6 @@ if uploaded_file is not None:
       ].copy()
 
       if not df_mss_summary.empty:
-        # Menyesuaikan kolom aging berdasarkan status masing-masing baris di tabel detail
         df_mss_summary["Aging Days"] = np.where(
             df_mss_summary["Status Pengiriman MSS"].str.strip()
             == "MSS Need Send",
@@ -675,7 +796,6 @@ if uploaded_file is not None:
             df_mss_summary["Aging_MSS_Days"],
         )
 
-        # --- FITUR FILTER STATUS PENGIRIMAN MSS ---
         available_mss_statuses = (
             df_mss_summary["Status Pengiriman MSS"]
             .astype(str)
@@ -687,10 +807,8 @@ if uploaded_file is not None:
             "🔍 Filter Status Pengiriman MSS:",
             options=["Semua Status"] + available_mss_statuses,
             index=0,
-            help="Filter data tabel pengiriman MSS berdasarkan statusnya",
         )
 
-        # Apply Filter
         if selected_mss_status != "Semua Status":
           df_mss_filtered = df_mss_summary[
               df_mss_summary["Status Pengiriman MSS"].str.strip()
@@ -716,7 +834,6 @@ if uploaded_file is not None:
 
       st.divider()
 
-      # --- 2. DETAIL BARANG PENGGANTI DARI KSO ---
       st.markdown("### 🚛 Detail Barang Pengganti dari KSO")
       if not df_kso_done.empty:
         df_kso_done = df_kso_done.sort_values(
