@@ -21,7 +21,7 @@ st.markdown(
 EXCEL_FILE_PATH = "Garansi_AMS.xlsx"
 
 
-@st.cache_data(ttl=600)  # Refresh cache otomatis setiap 10 menit
+@st.cache_data(ttl=600)
 def load_data_from_path(file_path):
   try:
     xls = pd.ExcelFile(file_path)
@@ -147,10 +147,12 @@ if is_loaded:
   ])
 
   # =========================================================================
-  # --- TAB 1: DASHBOARD APPROVAL (Bersumber dari Sheet Claim + Manual Ref) ---
+  # --- TAB 1: DASHBOARD APPROVAL ---
   # =========================================================================
   with tab1:
-    st.subheader("📊 Dashboard Proses Approval & Statistik Claim (Sheet Claim)")
+    st.subheader(
+        "📊 Dashboard Proses Approval & Statistik Claim (Sheet Claim)"
+    )
 
     if not df_claim.empty:
       total_tiket = len(df_claim)
@@ -187,7 +189,6 @@ if is_loaded:
 
       st.divider()
 
-      # --- VISUALISASI TREEMAP PROVINSI & TOP MATERIAL ---
       st.markdown(
           "### 📈 Grafik Analisis Berdasarkan Provinsi (Treemap) & Top Material"
       )
@@ -254,7 +255,6 @@ if is_loaded:
                 df_chart_merged["Scope_Default"] = "General Scope"
                 scope_col_found = "Scope_Default"
 
-            # Standarisasi status cancel / reject
             if status_col in df_chart_merged.columns:
               is_cancel_or_reject = (
                   df_chart_merged[status_col]
@@ -657,7 +657,7 @@ if is_loaded:
       st.info(f"Menampilkan **{len(df_filtered_drill)}** baris data.")
       st.dataframe(df_filtered_drill, use_container_width=True)
 
-      # --- FITUR EXPORT DATA KE EXCEL ---
+      # --- EXPORT DATA KE EXCEL ---
       output_excel = io.BytesIO()
       with pd.ExcelWriter(output_excel, engine="openpyxl") as writer:
         df_filtered_drill.to_excel(
@@ -677,7 +677,7 @@ if is_loaded:
       st.warning("Sheet 'Claim' kosong atau tidak ditemukan.")
 
   # =========================================================================
-  # --- TAB 2: DASHBOARD PENGIRIMAN & AGING (Bersumber dari Sheet Manual) ---
+  # --- TAB 2: DASHBOARD PENGIRIMAN & AGING ---
   # =========================================================================
   with tab2:
     st.subheader(
@@ -837,11 +837,15 @@ if is_loaded:
       ].copy()
 
       if not df_mss_summary.empty:
+        # --- BULATKAN AGING MENJADI INT (TANPA DESIMAL .000000) ---
         df_mss_summary["Aging Days"] = np.where(
             df_mss_summary["Status Pengiriman MSS"].str.strip()
             == "MSS Need Send",
             df_mss_summary["Aging_Created_Days"],
             df_mss_summary["Aging_MSS_Days"],
+        )
+        df_mss_summary["Aging Days"] = (
+            df_mss_summary["Aging Days"].fillna(0).astype(int)
         )
 
         available_mss_statuses = (
@@ -874,7 +878,7 @@ if is_loaded:
         )
         df_display_mss = df_mss_summary_sorted[cols_mss].copy()
 
-        # --- FIX: GANTI applymap MENJADI map UNTUK PANDAS TERBARU ---
+        # --- HIGHLIGHT AGING WARNA SOFT TANPA DESIMAL ---
         def highlight_aging(val):
           try:
             val_int = int(val)
@@ -890,8 +894,15 @@ if is_loaded:
             return ""
 
         styled_mss_df = df_display_mss.style.map(
-            highlight_aging, subset=["Aging Days"] if "Aging Days" in df_display_mss.columns else []
-        )
+            highlight_aging,
+            subset=(
+                ["Aging Days"] if "Aging Days" in df_display_mss.columns else []
+            ),
+        ).format(
+            {
+                "Aging Days": "{:.0f}"
+            }
+        )  # Format angka bersih tanpa desimal
 
         st.dataframe(styled_mss_df, use_container_width=True, hide_index=True)
       else:
@@ -906,6 +917,9 @@ if is_loaded:
         )
         df_kso_done = df_kso_done.rename(
             columns={"Aging_KSO_Days": "Aging Days"}
+        )
+        df_kso_done["Aging Days"] = (
+            df_kso_done["Aging Days"].fillna(0).astype(int)
         )
 
         cols_kso = get_unique_valid_cols(
@@ -939,108 +953,92 @@ if is_loaded:
       st.dataframe(df_engpar, use_container_width=True)
 
   # =========================================================================
-  # --- TAB 6: EXECUTIVE SUMMARY (RINGKASAN TINGKAT HIGH-LEVEL) ---
+  # --- TAB 6: EXECUTIVE SUMMARY (FOKUS LOGISTIK & VENDOR PERFORMANCE) ---
   # =========================================================================
   with tab6:
-    st.subheader("📈 Executive Summary & High-Level Metrics")
+    st.subheader("📈 Executive Summary & Logistik Performance")
     st.markdown(
-        "Ringkasan kinerja operasional dan penyelesaian klaim garansi untuk"
+        "Ringkasan fokus operasional pengiriman vendor MSS & KSO untuk"
         " manajemen."
     )
 
-    if not df_claim.empty:
-      status_col = (
-          "Overall Status"
-          if "Overall Status" in df_claim.columns
-          else ("Request Status" if "Request Status" in df_claim.columns else None)
-      )
-
-      total_tickets = len(df_claim)
-      approved_tickets = (
-          df_claim[status_col]
+    if not df_manual.empty:
+      total_manual = len(df_manual)
+      mss_need_cnt = (
+          df_manual["Status Pengiriman MSS"]
           .astype(str)
-          .str.contains("Approve", case=False, na=False)
+          .str.strip()
+          .eq("MSS Need Send")
           .sum()
-          if status_col
-          else 0
       )
-      rejected_tickets = (
-          df_claim[status_col]
+      mss_done_cnt = (
+          df_manual["Status Pengiriman MSS"]
           .astype(str)
-          .str.contains("Reject", case=False, na=False)
+          .str.strip()
+          .eq("MSS Done Send")
           .sum()
-          if status_col
-          else 0
       )
-      canceled_tickets = (
-          df_claim[status_col]
-          .astype(str)
-          .str.contains("Cancel", case=False, na=False)
-          .sum()
-          if status_col
-          else 0
-      )
-      in_progress = total_tickets - (rejected_tickets + canceled_tickets)
-
-      completion_rate = (
-          (approved_tickets / total_tickets * 100) if total_tickets > 0 else 0
-      )
+      kso_done_cnt = df_manual["Date_KSO_dt"].notnull().sum()
 
       ex1, ex2, ex3, ex4 = st.columns(4)
-      ex1.metric("🎯 Total Overall Klaim", f"{total_tickets} Tiket")
+      ex1.metric("📦 Total Item Dimonitor", f"{total_manual} Item")
       ex2.metric(
-          "✅ Penyelesaian Approval",
-          f"{approved_tickets} Tiket",
-          f"{completion_rate:.1f}% Rate",
+          "🚨 MSS Need Send (Pending)",
+          f"{mss_need_cnt} Item",
+          help="Material yang masih menunggu dikirim oleh MSS",
       )
-      ex3.metric("⏳ Tiket In-Progress", f"{in_progress} Tiket")
-      ex4.metric(
-          "❌ Tiket Dibatalkan/Reject", f"{rejected_tickets + canceled_tickets}"
-      )
+      ex3.metric("✅ MSS Done Send", f"{mss_done_cnt} Item")
+      ex4.metric("🏢 KSO Done Send", f"{kso_done_cnt} Item")
 
       st.divider()
 
       col_e1, col_e2 = st.columns(2)
 
       with col_e1:
-        st.markdown("##### 🍩 Distribusi Status Tiket Global")
-        status_counts = df_claim[status_col].value_counts().reset_index()
-        status_counts.columns = ["Status", "Jumlah"]
+        st.markdown("##### 📊 Proporsi Status Pengiriman MSS")
+        mss_status_counts = (
+            df_manual["Status Pengiriman MSS"].value_counts().reset_index()
+        )
+        mss_status_counts.columns = ["Status MSS", "Jumlah"]
 
-        fig_pie = px.pie(
-            status_counts,
-            names="Status",
+        fig_pie_mss = px.pie(
+            mss_status_counts,
+            names="Status MSS",
             values="Jumlah",
             hole=0.4,
-            color_discrete_sequence=px.colors.qualitative.Pastel,
+            color_discrete_sequence=px.colors.qualitative.Safe,
         )
-        fig_pie.update_traces(textinfo="percent+label")
-        fig_pie.update_layout(margin=dict(t=20, b=20, l=10, r=10), height=380)
-        st.plotly_chart(fig_pie, use_container_width=True)
+        fig_pie_mss.update_traces(textinfo="percent+label")
+        fig_pie_mss.update_layout(margin=dict(t=20, b=20, l=10, r=10), height=380)
+        st.plotly_chart(fig_pie_mss, use_container_width=True)
 
       with col_e2:
-        st.markdown("##### 🏢 Beban Klaim per Provinsi")
-        if not df_manual.empty and "Provinsi" in df_manual.columns:
-          prov_summary_chart = (
-              df_manual["Provinsi"].value_counts().reset_index()
-          )
-          prov_summary_chart.columns = ["Provinsi", "Jumlah Tiket"]
+        st.markdown("##### 🏗️ Top 5 Material dengan Aktivitas Terbanyak")
+        if "Material" in df_manual.columns:
+          mat_top = df_manual["Material"].value_counts().head(5).reset_index()
+          mat_top.columns = ["Material", "Jumlah"]
 
-          fig_prov_bar = px.bar(
-              prov_summary_chart,
-              x="Provinsi",
-              y="Jumlah Tiket",
-              text="Jumlah Tiket",
-              color="Jumlah Tiket",
-              color_continuous_scale="Viridis",
+          fig_mat_bar = px.bar(
+              mat_top,
+              x="Jumlah",
+              y="Material",
+              orientation="h",
+              text="Jumlah",
+              color="Jumlah",
+              color_continuous_scale="Blues",
           )
-          fig_prov_bar.update_traces(textposition="outside")
-          fig_prov_bar.update_layout(
-              margin=dict(t=20, b=20, l=10, r=10), height=380
+          fig_mat_bar.update_traces(textposition="outside")
+          fig_mat_bar.update_layout(
+              yaxis=dict(autorange="reversed"),
+              margin=dict(t=20, b=20, l=10, r=10),
+              height=380,
           )
-          st.plotly_chart(fig_prov_bar, use_container_width=True)
+          st.plotly_chart(fig_mat_bar, use_container_width=True)
         else:
-          st.info("Data provinsi tidak tersedia.")
+          st.info("Data material tidak tersedia.")
+
+    else:
+      st.warning("Sheet 'Manual' kosong.")
 
 else:
   st.error(
