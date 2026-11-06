@@ -657,7 +657,7 @@ if is_loaded:
       st.info(f"Menampilkan **{len(df_filtered_drill)}** baris data.")
       st.dataframe(df_filtered_drill, use_container_width=True)
 
-      # --- FITUR FITUR FITUR: EXPORT DATA KE EXCEL ---
+      # --- FITUR EXPORT DATA KE EXCEL ---
       output_excel = io.BytesIO()
       with pd.ExcelWriter(output_excel, engine="openpyxl") as writer:
         df_filtered_drill.to_excel(
@@ -874,24 +874,22 @@ if is_loaded:
         )
         df_display_mss = df_mss_summary_sorted[cols_mss].copy()
 
-        # --- FITUR COLOR CODING AGING (Styler Background Warna Soft) ---
+        # --- FIX: GANTI applymap MENJADI map UNTUK PANDAS TERBARU ---
         def highlight_aging(val):
           try:
             val_int = int(val)
             if val_int > 30:
               return (
                   "background-color: #FFC7CE; color: #9C0006; font-weight: bold"
-              )  # Merah Soft
+              )
             elif 15 <= val_int <= 30:
-              return (
-                  "background-color: #FFEB9C; color: #9C6500;"
-              )  # Kuning Soft
+              return "background-color: #FFEB9C; color: #9C6500;"
             else:
-              return "background-color: #C6EFCE; color: #006100;"  # Hijau Soft
+              return "background-color: #C6EFCE; color: #006100;"
           except:
             return ""
 
-        styled_mss_df = df_display_mss.style.applymap(
+        styled_mss_df = df_display_mss.style.map(
             highlight_aging, subset=["Aging Days"] if "Aging Days" in df_display_mss.columns else []
         )
 
