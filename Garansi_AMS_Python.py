@@ -136,13 +136,10 @@ if is_loaded:
             inplace=True,
         )
 
-  # --- TAB NAVIGASI UTAMA ---
-  tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+  # --- TAB NAVIGASI UTAMA (Hanya 3 Tab Fungsional) ---
+  tab1, tab2, tab3 = st.tabs([
       "📊 Dashboard Approval (Claim)",
       "🚚 Dashboard Pengiriman (Manual)",
-      "📋 Data Sheet Manual",
-      "📥 Data Sheet Claim",
-      "🗺️ Data Sheet Engpar",
       "📈 Executive Summary",
   ])
 
@@ -837,7 +834,6 @@ if is_loaded:
       ].copy()
 
       if not df_mss_summary.empty:
-        # --- BULATKAN AGING MENJADI INT (TANPA DESIMAL .000000) ---
         df_mss_summary["Aging Days"] = np.where(
             df_mss_summary["Status Pengiriman MSS"].str.strip()
             == "MSS Need Send",
@@ -878,7 +874,6 @@ if is_loaded:
         )
         df_display_mss = df_mss_summary_sorted[cols_mss].copy()
 
-        # --- HIGHLIGHT AGING WARNA SOFT TANPA DESIMAL ---
         def highlight_aging(val):
           try:
             val_int = int(val)
@@ -898,11 +893,7 @@ if is_loaded:
             subset=(
                 ["Aging Days"] if "Aging Days" in df_display_mss.columns else []
             ),
-        ).format(
-            {
-                "Aging Days": "{:.0f}"
-            }
-        )  # Format angka bersih tanpa desimal
+        ).format({"Aging Days": "{:.0f}"})
 
         st.dataframe(styled_mss_df, use_container_width=True, hide_index=True)
       else:
@@ -935,27 +926,9 @@ if is_loaded:
       st.warning("Sheet 'Manual' kosong atau tidak ditemukan.")
 
   # =========================================================================
-  # --- TAB 3, 4, 5: DETAIL SHEET ---
+  # --- TAB 3: EXECUTIVE SUMMARY ---
   # =========================================================================
   with tab3:
-    st.subheader("📋 Detail Sheet Manual (Tracking Pengiriman)")
-    if not df_manual.empty:
-      st.dataframe(df_manual, use_container_width=True)
-
-  with tab4:
-    st.subheader("📥 Detail Sheet Claim (Master Data Approval)")
-    if not df_claim.empty:
-      st.dataframe(df_claim, use_container_width=True)
-
-  with tab5:
-    st.subheader("🗺️ Detail Sheet Engpar (Referensi)")
-    if not df_engpar.empty:
-      st.dataframe(df_engpar, use_container_width=True)
-
-  # =========================================================================
-  # --- TAB 6: EXECUTIVE SUMMARY (FOKUS LOGISTIK & VENDOR PERFORMANCE) ---
-  # =========================================================================
-  with tab6:
     st.subheader("📈 Executive Summary & Logistik Performance")
     st.markdown(
         "Ringkasan fokus operasional pengiriman vendor MSS & KSO untuk"
