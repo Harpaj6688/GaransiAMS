@@ -17,16 +17,15 @@ st.markdown(
     " secara terpusat."
 )
 
-# File Uploader untuk file Excel utama
-uploaded_file = st.file_uploader(
-    "Upload file Excel `Garansi_AMS.xlsx`", type=["xlsx"]
-)
+# --- CONFIGURASI FILE PATH ---
+# Pastikan file Garansi_AMS.xlsx ditaruh di folder/root repo yang sama dengan file script ini
+EXCEL_FILE_PATH = "Garansi_AMS.xlsx"
 
-if uploaded_file is not None:
 
-  @st.cache_data
-  def load_data(file):
-    xls = pd.ExcelFile(file)
+@st.cache_data(ttl=600)  # Refresh cache otomatis setiap 10 menit jika ada update
+def load_data_from_path(file_path):
+  try:
+    xls = pd.ExcelFile(file_path)
     sheet_names = xls.sheet_names
 
     df_claim = (
@@ -45,10 +44,16 @@ if uploaded_file is not None:
         else pd.DataFrame()
     )
 
-    return df_claim, df_manual, df_engpar
+    return df_claim, df_manual, df_engpar, True
+  except Exception as e:
+    return pd.DataFrame(), pd.DataFrame(), pd.DataFrame(), False
 
-  df_claim, df_manual, df_engpar = load_data(uploaded_file)
-  st.success("File Excel berhasil dimuat dengan sukses!")
+
+# Memuat data secara otomatis dari file Excel
+df_claim, df_manual, df_engpar, is_loaded = load_data_from_path(EXCEL_FILE_PATH)
+
+if is_loaded:
+  st.success("✅ Data garansi berhasil dimuat otomatis dari repository!")
 
   # Preprocessing Tanggal & Koordinat untuk Manual & Engpar
   today = pd.to_datetime(datetime.today().date())
@@ -290,7 +295,7 @@ if uploaded_file is not None:
 
             df_grouped_prov["Provinsi_Label"] = df_grouped_prov["Provinsi"].map(prov_name_mapping)
 
-            # Pembobotan visual agar kotak kecil (seperti Kaltara) tetap proporsional
+            # Pembobotan visual agar kotak kecil tetap proporsional
             df_grouped_prov["Visual_Size"] = df_grouped_prov["Jumlah_Tiket"].apply(
                 lambda x: max(x, 10)
             )
@@ -874,7 +879,7 @@ if uploaded_file is not None:
       st.dataframe(df_engpar, use_container_width=True)
 
 else:
-  st.info(
-      "👋 Silakan upload file Excel `Garansi_AMS.xlsx` melalui tombol di atas"
-      " untuk mulai melihat dashboard."
+  st.error(
+      f"⚠️ File Excel `{EXCEL_FILE_PATH}` tidak ditemukan!"
+      " Pastikan file `Garansi_AMS.xlsx` sudah di-upload ke folder repository GitHub."
   )
