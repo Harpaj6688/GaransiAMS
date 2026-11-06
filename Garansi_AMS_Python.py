@@ -1,10 +1,10 @@
-import datetime
-from datetime import datetime
+import io
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import pydeck as pdk
 import streamlit as st
+from datetime import datetime
 
 # Konfigurasi Halaman Streamlit
 st.set_page_config(
@@ -18,11 +18,10 @@ st.markdown(
 )
 
 # --- CONFIGURASI FILE PATH ---
-# Pastikan file Garansi_AMS.xlsx ditaruh di folder/root repo yang sama dengan file script ini
 EXCEL_FILE_PATH = "Garansi_AMS.xlsx"
 
 
-@st.cache_data(ttl=600)  # Refresh cache otomatis setiap 10 menit jika ada update
+@st.cache_data(ttl=600)  # Refresh cache otomatis setiap 10 menit
 def load_data_from_path(file_path):
   try:
     xls = pd.ExcelFile(file_path)
@@ -80,8 +79,8 @@ if is_loaded:
       df_claim_temp = df_claim[[join_key, claim_date_col]].drop_duplicates(
           subset=[join_key]
       )
-      
-      # FIX PARSING TANGGAL SERVER (Format DD-MM-YYYY dengan dayfirst=True)
+
+      # PARSING TANGGAL SERVER (Format DD-MM-YYYY dengan dayfirst=True)
       df_claim_temp["Date_Created_dt"] = pd.to_datetime(
           df_claim_temp[claim_date_col], dayfirst=True, errors="coerce"
       )
@@ -138,21 +137,20 @@ if is_loaded:
         )
 
   # --- TAB NAVIGASI UTAMA ---
-  tab1, tab2, tab3, tab4, tab5 = st.tabs([
+  tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
       "📊 Dashboard Approval (Claim)",
       "🚚 Dashboard Pengiriman (Manual)",
       "📋 Data Sheet Manual",
       "📥 Data Sheet Claim",
       "🗺️ Data Sheet Engpar",
+      "📈 Executive Summary",
   ])
 
   # =========================================================================
   # --- TAB 1: DASHBOARD APPROVAL (Bersumber dari Sheet Claim + Manual Ref) ---
   # =========================================================================
   with tab1:
-    st.subheader(
-        "📊 Dashboard Proses Approval & Statistik Claim (Sheet Claim)"
-    )
+    st.subheader("📊 Dashboard Proses Approval & Statistik Claim (Sheet Claim)")
 
     if not df_claim.empty:
       total_tiket = len(df_claim)
@@ -209,11 +207,19 @@ if is_loaded:
         if not df_manual.empty and join_key_chart:
           manual_ref_cols = [join_key_chart]
           prov_col_found = next(
-              (c for c in ["Provinsi", "Province", "Prov"] if c in df_manual.columns),
+              (
+                  c
+                  for c in ["Provinsi", "Province", "Prov"]
+                  if c in df_manual.columns
+              ),
               None,
           )
           scope_col_found = next(
-              (c for c in ["Scope", "Kategori Scope", "Scope Pekerjaan"] if c in df_manual.columns),
+              (
+                  c
+                  for c in ["Scope", "Kategori Scope", "Scope Pekerjaan"]
+                  if c in df_manual.columns
+              ),
               None,
           )
 
@@ -224,14 +230,24 @@ if is_loaded:
 
           if prov_col_found:
             df_chart_merged = df_claim.merge(
-                df_manual[manual_ref_cols].drop_duplicates(subset=[join_key_chart]),
+                df_manual[manual_ref_cols].drop_duplicates(
+                    subset=[join_key_chart]
+                ),
                 on=join_key_chart,
                 how="left",
             )
 
             if not scope_col_found:
               scope_col_found = next(
-                  (c for c in ["Scope", "Kategori Scope", "Scope Pekerjaan"] if c in df_chart_merged.columns),
+                  (
+                      c
+                      for c in [
+                          "Scope",
+                          "Kategori Scope",
+                          "Scope Pekerjaan",
+                      ]
+                      if c in df_chart_merged.columns
+                  ),
                   None,
               )
               if not scope_col_found:
@@ -240,19 +256,34 @@ if is_loaded:
 
             # Standarisasi status cancel / reject
             if status_col in df_chart_merged.columns:
-              is_cancel_or_reject = df_chart_merged[status_col].astype(str).str.contains(
-                  "Cancel|Reject", case=False, na=False
+              is_cancel_or_reject = (
+                  df_chart_merged[status_col]
+                  .astype(str)
+                  .str.contains("Cancel|Reject", case=False, na=False)
               )
-              df_chart_merged.loc[is_cancel_or_reject, scope_col_found] = "REJECTED / CANCELED"
+              df_chart_merged.loc[is_cancel_or_reject, scope_col_found] = (
+                  "REJECTED / CANCELED"
+              )
 
-            # Hitung Jumlah Tiket & Total Material
-            qty_col = next((c for c in ["Quantity", "Qty", "Jumlah"] if c in df_chart_merged.columns), None)
-            
+            qty_col = next(
+                (
+                    c
+                    for c in ["Quantity", "Qty", "Jumlah"]
+                    if c in df_chart_merged.columns
+                ),
+                None,
+            )
+
             if qty_col:
-              df_chart_merged[qty_col] = pd.to_numeric(df_chart_merged[qty_col], errors="coerce").fillna(1)
+              df_chart_merged[qty_col] = pd.to_numeric(
+                  df_chart_merged[qty_col], errors="coerce"
+              ).fillna(1)
               df_grouped_prov = (
                   df_chart_merged.groupby([prov_col_found, scope_col_found])
-                  .agg(Jumlah_Tiket=(join_key_chart, "count"), Total_Material=(qty_col, "sum"))
+                  .agg(
+                      Jumlah_Tiket=(join_key_chart, "count"),
+                      Total_Material=(qty_col, "sum"),
+                  )
                   .reset_index()
               )
             else:
@@ -261,41 +292,43 @@ if is_loaded:
                   .agg(Jumlah_Tiket=(join_key_chart, "count"))
                   .reset_index()
               )
-              df_grouped_prov["Total_Material"] = df_grouped_prov["Jumlah_Tiket"]
+              df_grouped_prov["Total_Material"] = df_grouped_prov[
+                  "Jumlah_Tiket"
+              ]
 
-            df_grouped_prov = df_grouped_prov.rename(columns={
-                prov_col_found: "Provinsi",
-                scope_col_found: "Scope"
-            })
+            df_grouped_prov = df_grouped_prov.rename(
+                columns={prov_col_found: "Provinsi", scope_col_found: "Scope"}
+            )
 
-            # --- MEMBUAT LABEL PROVINSI DENGAN TOTAL TIKET & MATERIAL ---
             prov_summary = (
                 df_grouped_prov.groupby("Provinsi")
-                .agg(Total_Tiket=("Jumlah_Tiket", "sum"), Total_Mat=("Total_Material", "sum"))
+                .agg(
+                    Total_Tiket=("Jumlah_Tiket", "sum"),
+                    Total_Mat=("Total_Material", "sum"),
+                )
                 .reset_index()
             )
-            
-            # Map nama provinsi baru dengan format: "NAMA PROVINSI | X Tiket, Y Material"
+
             prov_name_mapping = {}
             for _, row in prov_summary.iterrows():
               p_raw = row["Provinsi"]
               p_formatted = f"{str(p_raw).upper()} | {int(row['Total_Tiket'])} Tiket, {int(row['Total_Mat'])} Material"
               prov_name_mapping[p_raw] = p_formatted
 
-            df_grouped_prov["Provinsi_Label"] = df_grouped_prov["Provinsi"].map(prov_name_mapping)
-
-            # Pembobotan visual agar kotak kecil tetap proporsional
-            df_grouped_prov["Visual_Size"] = df_grouped_prov["Jumlah_Tiket"].apply(
-                lambda x: max(x, 10)
+            df_grouped_prov["Provinsi_Label"] = df_grouped_prov["Provinsi"].map(
+                prov_name_mapping
             )
+            df_grouped_prov["Visual_Size"] = df_grouped_prov[
+                "Jumlah_Tiket"
+            ].apply(lambda x: max(x, 10))
 
             color_map = {
-                "Power": "#59A14F",                # Hijau Soft
-                "BTS": "#4E79A7",                  # Biru Tua Soft
-                "Transmission": "#9CC2E5",         # Steel Blue Soft
-                "Transmisi": "#9CC2E5",            
-                "Tower": "#4B9CD3",                # Biru Sedang
-                "REJECTED / CANCELED": "#E15759",  # Merah Soft
+                "Power": "#59A14F",
+                "BTS": "#4E79A7",
+                "Transmission": "#9CC2E5",
+                "Transmisi": "#9CC2E5",
+                "Tower": "#4B9CD3",
+                "REJECTED / CANCELED": "#E15759",
             }
 
             fig_treemap = px.treemap(
@@ -305,35 +338,39 @@ if is_loaded:
                 color="Scope",
                 color_discrete_map=color_map,
                 title="<b>Distribusi Tiket per Provinsi & Scope (Treemap)</b>",
-                custom_data=["Jumlah_Tiket", "Total_Material"]
+                custom_data=["Jumlah_Tiket", "Total_Material"],
             )
-            
+
             fig_treemap.update_traces(
                 textinfo="label+value",
-                texttemplate="<b>%{label}</b><br>%{customdata[0]} Tiket | %{customdata[1]} Mat",
-                hovertemplate=(
-                    "<b>Provinsi / Scope:</b> %{label}<br>"
-                    "<b>Jumlah Tiket:</b> %{customdata[0]} Tiket<br>"
-                    "<b>Total Material:</b> %{customdata[1]} Material"
+                texttemplate=(
+                    "<b>%{label}</b><br>%{customdata[0]} Tiket | %{customdata[1]}"
+                    " Mat"
                 ),
-                marker=dict(
-                    line=dict(width=1.5, color="white")
-                )
+                hovertemplate=(
+                    "<b>Provinsi / Scope:</b> %{label}<br><b>Jumlah Tiket:</b>"
+                    " %{customdata[0]} Tiket<br><b>Total Material:</b>"
+                    " %{customdata[1]} Material"
+                ),
+                marker=dict(line=dict(width=1.5, color="white")),
             )
-            
+
             fig_treemap.update_layout(
                 template="plotly_white",
                 paper_bgcolor="white",
                 plot_bgcolor="white",
                 margin=dict(t=40, b=20, l=10, r=10),
-                height=480
+                height=480,
             )
 
             st.plotly_chart(fig_treemap, use_container_width=True)
           else:
             st.info("Kolom 'Provinsi' tidak ditemukan di dalam Sheet Manual.")
         else:
-          st.info("Sheet Manual kosong atau tidak ada key yang cocok untuk merge data provinsi.")
+          st.info(
+              "Sheet Manual kosong atau tidak ada key yang cocok untuk merge"
+              " data provinsi."
+          )
 
       with col_c2:
         if "Material" in df_claim.columns:
@@ -619,6 +656,23 @@ if is_loaded:
 
       st.info(f"Menampilkan **{len(df_filtered_drill)}** baris data.")
       st.dataframe(df_filtered_drill, use_container_width=True)
+
+      # --- FITUR FITUR FITUR: EXPORT DATA KE EXCEL ---
+      output_excel = io.BytesIO()
+      with pd.ExcelWriter(output_excel, engine="openpyxl") as writer:
+        df_filtered_drill.to_excel(
+            writer, index=False, sheet_name="Filtered_Data"
+        )
+      excel_data = output_excel.getvalue()
+
+      st.download_button(
+          label="📥 Export Data Terfilter (Excel)",
+          data=excel_data,
+          file_name=f"Data_Garansi_Filtered_{datetime.now().strftime('%Y%m%d_%H%M')}.xlsx",
+          mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          help="Klik untuk men-download hasil filter data di atas ke format Excel",
+      )
+
     else:
       st.warning("Sheet 'Claim' kosong atau tidak ditemukan.")
 
@@ -818,11 +872,30 @@ if is_loaded:
         cols_mss = get_unique_valid_cols(
             df_mss_summary_sorted, exact_columns, "Aging Days"
         )
-        st.dataframe(
-            df_mss_summary_sorted[cols_mss],
-            use_container_width=True,
-            hide_index=True,
+        df_display_mss = df_mss_summary_sorted[cols_mss].copy()
+
+        # --- FITUR COLOR CODING AGING (Styler Background Warna Soft) ---
+        def highlight_aging(val):
+          try:
+            val_int = int(val)
+            if val_int > 30:
+              return (
+                  "background-color: #FFC7CE; color: #9C0006; font-weight: bold"
+              )  # Merah Soft
+            elif 15 <= val_int <= 30:
+              return (
+                  "background-color: #FFEB9C; color: #9C6500;"
+              )  # Kuning Soft
+            else:
+              return "background-color: #C6EFCE; color: #006100;"  # Hijau Soft
+          except:
+            return ""
+
+        styled_mss_df = df_display_mss.style.applymap(
+            highlight_aging, subset=["Aging Days"] if "Aging Days" in df_display_mss.columns else []
         )
+
+        st.dataframe(styled_mss_df, use_container_width=True, hide_index=True)
       else:
         st.info("Tidak ada data pengiriman MSS.")
 
@@ -867,8 +940,113 @@ if is_loaded:
     if not df_engpar.empty:
       st.dataframe(df_engpar, use_container_width=True)
 
+  # =========================================================================
+  # --- TAB 6: EXECUTIVE SUMMARY (RINGKASAN TINGKAT HIGH-LEVEL) ---
+  # =========================================================================
+  with tab6:
+    st.subheader("📈 Executive Summary & High-Level Metrics")
+    st.markdown(
+        "Ringkasan kinerja operasional dan penyelesaian klaim garansi untuk"
+        " manajemen."
+    )
+
+    if not df_claim.empty:
+      status_col = (
+          "Overall Status"
+          if "Overall Status" in df_claim.columns
+          else ("Request Status" if "Request Status" in df_claim.columns else None)
+      )
+
+      total_tickets = len(df_claim)
+      approved_tickets = (
+          df_claim[status_col]
+          .astype(str)
+          .str.contains("Approve", case=False, na=False)
+          .sum()
+          if status_col
+          else 0
+      )
+      rejected_tickets = (
+          df_claim[status_col]
+          .astype(str)
+          .str.contains("Reject", case=False, na=False)
+          .sum()
+          if status_col
+          else 0
+      )
+      canceled_tickets = (
+          df_claim[status_col]
+          .astype(str)
+          .str.contains("Cancel", case=False, na=False)
+          .sum()
+          if status_col
+          else 0
+      )
+      in_progress = total_tickets - (rejected_tickets + canceled_tickets)
+
+      completion_rate = (
+          (approved_tickets / total_tickets * 100) if total_tickets > 0 else 0
+      )
+
+      ex1, ex2, ex3, ex4 = st.columns(4)
+      ex1.metric("🎯 Total Overall Klaim", f"{total_tickets} Tiket")
+      ex2.metric(
+          "✅ Penyelesaian Approval",
+          f"{approved_tickets} Tiket",
+          f"{completion_rate:.1f}% Rate",
+      )
+      ex3.metric("⏳ Tiket In-Progress", f"{in_progress} Tiket")
+      ex4.metric(
+          "❌ Tiket Dibatalkan/Reject", f"{rejected_tickets + canceled_tickets}"
+      )
+
+      st.divider()
+
+      col_e1, col_e2 = st.columns(2)
+
+      with col_e1:
+        st.markdown("##### 🍩 Distribusi Status Tiket Global")
+        status_counts = df_claim[status_col].value_counts().reset_index()
+        status_counts.columns = ["Status", "Jumlah"]
+
+        fig_pie = px.pie(
+            status_counts,
+            names="Status",
+            values="Jumlah",
+            hole=0.4,
+            color_discrete_sequence=px.colors.qualitative.Pastel,
+        )
+        fig_pie.update_traces(textinfo="percent+label")
+        fig_pie.update_layout(margin=dict(t=20, b=20, l=10, r=10), height=380)
+        st.plotly_chart(fig_pie, use_container_width=True)
+
+      with col_e2:
+        st.markdown("##### 🏢 Beban Klaim per Provinsi")
+        if not df_manual.empty and "Provinsi" in df_manual.columns:
+          prov_summary_chart = (
+              df_manual["Provinsi"].value_counts().reset_index()
+          )
+          prov_summary_chart.columns = ["Provinsi", "Jumlah Tiket"]
+
+          fig_prov_bar = px.bar(
+              prov_summary_chart,
+              x="Provinsi",
+              y="Jumlah Tiket",
+              text="Jumlah Tiket",
+              color="Jumlah Tiket",
+              color_continuous_scale="Viridis",
+          )
+          fig_prov_bar.update_traces(textposition="outside")
+          fig_prov_bar.update_layout(
+              margin=dict(t=20, b=20, l=10, r=10), height=380
+          )
+          st.plotly_chart(fig_prov_bar, use_container_width=True)
+        else:
+          st.info("Data provinsi tidak tersedia.")
+
 else:
   st.error(
       f"⚠️ File Excel `{EXCEL_FILE_PATH}` tidak ditemukan!"
-      " Pastikan file `Garansi_AMS.xlsx` sudah di-upload ke folder repository GitHub."
+      " Pastikan file `Garansi_AMS.xlsx` sudah di-upload ke folder repository"
+      " GitHub."
   )
