@@ -80,14 +80,11 @@ if is_loaded:
       df_claim_temp = df_claim[[join_key, claim_date_col]].drop_duplicates(
           subset=[join_key]
       )
+      
+      # FIX PARSING TANGGAL SERVER (Format DD-MM-YYYY dengan dayfirst=True)
       df_claim_temp["Date_Created_dt"] = pd.to_datetime(
-          df_claim_temp[claim_date_col], format="%d/%m/%Y", errors="coerce"
+          df_claim_temp[claim_date_col], dayfirst=True, errors="coerce"
       )
-
-      if df_claim_temp["Date_Created_dt"].isnull().all():
-        df_claim_temp["Date_Created_dt"] = pd.to_datetime(
-            df_claim_temp[claim_date_col], errors="coerce"
-        )
 
       df_manual = df_manual.merge(
           df_claim_temp[[join_key, "Date_Created_dt"]],
@@ -105,24 +102,16 @@ if is_loaded:
 
     if "Date Pengiriman MSS" in df_manual.columns:
       df_manual["Date_MSS_dt"] = pd.to_datetime(
-          df_manual["Date Pengiriman MSS"], format="%d/%m/%Y", errors="coerce"
+          df_manual["Date Pengiriman MSS"], dayfirst=True, errors="coerce"
       )
-      if df_manual["Date_MSS_dt"].isnull().all():
-        df_manual["Date_MSS_dt"] = pd.to_datetime(
-            df_manual["Date Pengiriman MSS"], errors="coerce"
-        )
       df_manual["Aging_MSS_Days"] = (today - df_manual["Date_MSS_dt"]).dt.days
     else:
       df_manual["Aging_MSS_Days"] = np.nan
 
     if "Date Pengiriman KSO" in df_manual.columns:
       df_manual["Date_KSO_dt"] = pd.to_datetime(
-          df_manual["Date Pengiriman KSO"], format="%d/%m/%Y", errors="coerce"
+          df_manual["Date Pengiriman KSO"], dayfirst=True, errors="coerce"
       )
-      if df_manual["Date_KSO_dt"].isnull().all():
-        df_manual["Date_KSO_dt"] = pd.to_datetime(
-            df_manual["Date Pengiriman KSO"], errors="coerce"
-        )
       df_manual["Aging_KSO_Days"] = (today - df_manual["Date_KSO_dt"]).dt.days
     else:
       df_manual["Aging_KSO_Days"] = np.nan
